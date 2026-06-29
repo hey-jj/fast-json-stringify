@@ -2,10 +2,12 @@
 name = "fast-json-stringify"
 version = "0.1.0"
 edition = "2021"
-description = "compile a JSON Schema into a fast JSON serializer function"
+description = "Compile a JSON Schema into a fast JSON serializer"
 license = "MIT"
 repository = "https://github.com/hey-jj/fast-json-stringify"
 readme = "README.md"
+keywords = ["json", "schema", "serialize", "stringify", "serialization"]
+categories = ["encoding", "parsing", "data-structures"]
 
 [dependencies]
 serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
