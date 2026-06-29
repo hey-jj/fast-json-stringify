@@ -13,14 +13,16 @@ pub struct BuildError {
 }
 
 impl BuildError {
-    /// Wrap a message produced during the build.
-    pub fn new(message: impl Into<String>) -> Self {
+    /// Wrap a message produced during the build. Crate-internal so callers
+    /// cannot mint an error of this type.
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         BuildError {
             message: message.into(),
         }
     }
 
-    /// The error message.
+    /// The error message. This is the stable contract for the cause, and it
+    /// matches the text a JavaScript build would throw.
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -41,14 +43,16 @@ pub struct StringifyError {
 }
 
 impl StringifyError {
-    /// Wrap a message produced during serialization.
-    pub fn new(message: impl Into<String>) -> Self {
+    /// Wrap a message produced during serialization. Crate-internal so callers
+    /// cannot mint an error of this type.
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         StringifyError {
             message: message.into(),
         }
     }
 
-    /// The error message.
+    /// The error message. This is the stable contract for the cause, and it
+    /// matches the text a JavaScript serialize would throw.
     pub fn message(&self) -> &str {
         &self.message
     }
