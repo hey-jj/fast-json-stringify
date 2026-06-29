@@ -104,6 +104,17 @@ fn check(schema: &Value, path: &str) -> Option<Failure> {
         }
     }
 
+    if let Some(Value::Object(patterns)) = map.get("patternProperties") {
+        for key in patterns.keys() {
+            if regex::Regex::new(key).is_err() {
+                return Some(Failure {
+                    instance_path: format!("{path}/patternProperties"),
+                    message: "must match format \"regex\"".to_string(),
+                });
+            }
+        }
+    }
+
     for keyword in ["properties", "patternProperties", "definitions", "$defs"] {
         if let Some(Value::Object(props)) = map.get(keyword) {
             for (key, sub) in props {
