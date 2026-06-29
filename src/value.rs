@@ -51,6 +51,11 @@ impl Object {
     }
 
     /// Append or overwrite a key. Existing keys keep their position.
+    ///
+    /// This scans the existing entries to find a matching key, so a single
+    /// insert is O(n) and building an n-key object is O(n^2). Objects built from
+    /// schemas are small, so this stays cheap in practice. Use
+    /// [`FromIterator`](Object::from_iter) for bulk construction.
     pub fn insert(&mut self, key: impl Into<String>, value: Value) {
         let key = key.into();
         if let Some(slot) = self.entries.iter_mut().find(|(k, _)| *k == key) {
@@ -70,9 +75,35 @@ impl Object {
         self.entries.iter().map(|(k, v)| (k, v))
     }
 
+    /// The number of entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     /// True when the object holds no entries.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+}
+
+impl<'a> IntoIterator for &'a Object {
+    type Item = (&'a String, &'a Value);
+    type IntoIter = std::iter::Map<
+        std::slice::Iter<'a, (String, Value)>,
+        fn(&'a (String, Value)) -> (&'a String, &'a Value),
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.iter().map(|(k, v)| (k, v))
+    }
+}
+
+impl IntoIterator for Object {
+    type Item = (String, Value);
+    type IntoIter = std::vec::IntoIter<(String, Value)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.entries.into_iter()
     }
 }
 
@@ -103,12 +134,6 @@ impl Value {
         }
     }
 
-    /// True when the value would pass a `toJSON` presence check, that is a
-    /// [`Value::Custom`] or [`Value::Date`].
-    pub fn has_to_json(&self) -> bool {
-        matches!(self, Value::Custom(_) | Value::Date(_))
-    }
-
     /// Render a [`Value::Date`] as a full ISO 8601 UTC timestamp.
     pub fn date_iso(&self) -> Option<String> {
         if let Value::Date(ms) = self {
@@ -125,16 +150,15 @@ impl From<serde_json::Value> for Value {
             serde_json::Value::Null => Value::Null,
             serde_json::Value::Bool(b) => Value::Bool(b),
             serde_json::Value::Number(n) => {
-                if let Some(f) = n.as_f64() {
-                    Value::Number(f)
-                } else {
-                    // arbitrary_precision can hold integers beyond f64. Keep them
-                    // as BigInt when they fit i128, otherwise fall back to 0.
-                    n.to_string()
-                        .parse::<i128>()
-                        .map(Value::BigInt)
-                        .unwrap_or(Value::Number(0.0))
-                }
+                // arbitrary_precision returns None from as_f64 only when the
+                // magnitude overflows f64. JSON.parse maps those to Infinity, so
+                // parse the text into an f64 to recover inf or -inf. Under
+                // type: number the serializer then renders the infinity as null.
+                Value::Number(
+                    n.as_f64()
+                        .or_else(|| n.to_string().parse::<f64>().ok())
+                        .unwrap_or(f64::NAN),
+                )
             }
             serde_json::Value::String(s) => Value::String(s),
             serde_json::Value::Array(a) => Value::Array(a.into_iter().map(Value::from).collect()),

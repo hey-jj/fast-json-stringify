@@ -56,3 +56,16 @@ fn infinite_numbers_render_null() {
         assert_eq!(stringify.call(&Value::Number(v)).unwrap(), "null");
     }
 }
+
+#[test]
+fn overflow_magnitude_input_renders_null() {
+    // A JSON number whose magnitude overflows f64 parses to infinity, the same
+    // as JSON.parse. Under type: number that infinity renders as null.
+    let stringify = build_ok(json!({ "type": "number" }));
+    for raw in ["1e400", "1e309"] {
+        let input = Value::from(serde_json::from_str::<serde_json::Value>(raw).unwrap());
+        assert_eq!(stringify.call(&input).unwrap(), "null", "input {raw}");
+    }
+    let neg = Value::from(serde_json::from_str::<serde_json::Value>("-1e400").unwrap());
+    assert_eq!(stringify.call(&neg).unwrap(), "null");
+}
