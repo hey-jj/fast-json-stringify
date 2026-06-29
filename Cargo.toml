@@ -8,3 +8,9 @@ repository = "https://github.com/hey-jj/fast-json-stringify"
 readme = "README.md"
 
 [dependencies]
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+ryu = "1"
+regex = "1"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
