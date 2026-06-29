@@ -19,7 +19,7 @@
 //! use serde_json::json;
 //!
 //! let stringify = build(&json!({ "type": "string" }), None).unwrap();
-//! assert_eq!(stringify(&Value::from(json!("hello"))).unwrap(), "\"hello\"");
+//! assert_eq!(stringify.call(&Value::from(json!("hello"))).unwrap(), "\"hello\"");
 //! ```
 //!
 //! The model adds the host objects the serializer coerces:
@@ -39,7 +39,7 @@
 //! });
 //! let stringify = build(&schema, None).unwrap();
 //! let input = Value::from(json!({ "name": "Ada", "age": 36 }));
-//! assert_eq!(stringify(&input).unwrap(), r#"{"name":"Ada","age":36}"#);
+//! assert_eq!(stringify.call(&input).unwrap(), r#"{"name":"Ada","age":36}"#);
 //! ```
 
 #![forbid(unsafe_code)]
@@ -65,19 +65,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub use error::{BuildError, StringifyError};
-pub use serializer::{Rounding, Serializer};
+pub use serializer::Rounding;
 pub use value::{Object, Value};
 
 use engine::Plan;
 
-/// The valid `largeArrayMechanism` names, mirroring the source export.
-pub const VALID_LARGE_ARRAY_MECHANISMS: [&str; 2] = ["default", "json-stringify"];
-
 /// Default large-array threshold.
 const DEFAULT_LARGE_ARRAY_SIZE: usize = 20_000;
-
-/// The boxed closure type stored inside [`Stringify`].
-type Callable = Arc<dyn Fn(&Value) -> Result<String, StringifyError> + Send + Sync>;
 
 /// How large arrays serialize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -119,35 +113,34 @@ impl Default for Options {
     }
 }
 
-/// A compiled serializer. Call it with a [`Value`] to produce a JSON string.
+/// A compiled serializer. Call [`Stringify::call`] with a [`Value`] to produce a
+/// JSON string.
 ///
-/// [`Stringify`] derefs to a `Fn(&Value) -> Result<String, StringifyError>`, so
-/// it can be called like a closure (`stringify(&value)`) as well as through
-/// [`Stringify::call`].
+/// The type is a thin handle around a shared compiled plan. Clone is cheap, and
+/// the handle is `Send + Sync`, so one compiled serializer can run on many
+/// threads.
 #[derive(Clone)]
 pub struct Stringify {
     plan: Arc<Plan>,
-    callable: Callable,
 }
 
 impl Stringify {
     fn new(plan: Plan) -> Self {
-        let plan = Arc::new(plan);
-        let for_closure = plan.clone();
-        let callable: Callable = Arc::new(move |value: &Value| for_closure.serialize(value));
-        Stringify { plan, callable }
+        Stringify {
+            plan: Arc::new(plan),
+        }
     }
 
     /// Serialize a value to a JSON string.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`StringifyError`] when a required property is missing, a value
+    /// matches no branch of an `anyOf`, `oneOf`, type union, or tuple position,
+    /// or a numeric value cannot be converted, such as NaN under `type: number`
+    /// or a non-finite value under `type: integer`.
     pub fn call(&self, value: &Value) -> Result<String, StringifyError> {
         self.plan.serialize(value)
-    }
-}
-
-impl std::ops::Deref for Stringify {
-    type Target = dyn Fn(&Value) -> Result<String, StringifyError> + Send + Sync;
-    fn deref(&self) -> &Self::Target {
-        &*self.callable
     }
 }
 
@@ -160,15 +153,19 @@ impl std::fmt::Debug for Stringify {
 /// Compile a schema into a serializer.
 ///
 /// Validates the schema against the supported Draft-7 structure, resolves
-/// options, and returns a [`Stringify`]. Returns a [`BuildError`] for an invalid
-/// schema, an unknown rounding method, or an unresolvable reference.
+/// options, and returns a [`Stringify`].
+///
+/// # Errors
+///
+/// Returns a [`BuildError`] for a schema that fails the supported Draft-7
+/// structure check, a `$ref` that cannot be resolved, or an unsupported `type`.
 ///
 /// ```
 /// use fast_json_stringify::{build, Value};
 /// use serde_json::json;
 ///
 /// let stringify = build(&json!({ "type": "integer" }), None).unwrap();
-/// assert_eq!(stringify(&Value::from(json!(1615))).unwrap(), "1615");
+/// assert_eq!(stringify.call(&Value::from(json!(1615))).unwrap(), "1615");
 /// ```
 pub fn build(
     schema: &serde_json::Value,

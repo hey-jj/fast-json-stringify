@@ -72,12 +72,10 @@ fn write_value(value: &Value, out: &mut String) {
                 out.push_str("null");
             }
         }
-        Value::BigInt(_) => {
+        Value::BigInt(i) => {
             // JSON.stringify throws on BigInt. The serializer never routes a
             // BigInt here, so emit its decimal form defensively.
-            if let Value::BigInt(i) = value {
-                out.push_str(&i.to_string());
-            }
+            out.push_str(&i.to_string());
         }
         Value::String(s) => write_string(s, out),
         Value::Array(items) => {
@@ -94,9 +92,6 @@ fn write_value(value: &Value, out: &mut String) {
             out.push('{');
             let mut first = true;
             for (k, v) in obj.iter() {
-                if skip_in_json(v) {
-                    continue;
-                }
                 if !first {
                     out.push(',');
                 }
@@ -111,12 +106,6 @@ fn write_value(value: &Value, out: &mut String) {
         Value::Regex(_) => out.push_str("{}"),
         Value::Custom(inner) => write_value(inner, out),
     }
-}
-
-/// JSON.stringify drops object members that are undefined, functions, or
-/// symbols. The model has no such kinds, so nothing is skipped.
-fn skip_in_json(_value: &Value) -> bool {
-    false
 }
 
 /// Write a number value, preferring an exact integer string when serde holds

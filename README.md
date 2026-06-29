@@ -2,10 +2,10 @@
 
 Compile a JSON Schema into a fast JSON serializer.
 
-`build` reads a Draft-7 JSON Schema once and returns a closure that turns a
-matching value into a JSON string. The schema is inspected at build time, so each
-serialize call walks a pre-compiled plan instead of the schema. Output matches
-`JSON.stringify` byte for byte for conforming input.
+`build` reads a Draft-7 JSON Schema once and returns a `Stringify` handle that
+turns a matching value into a JSON string. The schema is inspected at build time,
+so each serialize call walks a pre-compiled plan instead of the schema. Output
+matches `JSON.stringify` byte for byte for conforming input.
 
 This is not a validator. The output is correct JSON when the input matches the
 schema. A mismatched input may produce malformed JSON or an error. Treat schemas
@@ -38,13 +38,14 @@ let input = Value::from(json!({ "name": "Ada", "age": 36 }));
 assert_eq!(stringify.call(&input).unwrap(), r#"{"name":"Ada","age":36}"#);
 ```
 
-`Stringify` also derefs to a `Fn`, so it can be called like a closure:
+`Stringify` is cheap to clone and is `Send + Sync`, so one compiled serializer
+can run on many threads:
 
 ```rust
 # use fast_json_stringify::{build, Value};
 # use serde_json::json;
 let stringify = build(&json!({ "type": "integer" }), None).unwrap();
-assert_eq!(stringify(&Value::from(json!(1615))).unwrap(), "1615");
+assert_eq!(stringify.call(&Value::from(json!(1615))).unwrap(), "1615");
 ```
 
 ## Value model

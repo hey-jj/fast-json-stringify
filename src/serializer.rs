@@ -23,18 +23,6 @@ pub enum Rounding {
 }
 
 impl Rounding {
-    /// Parse an option string. Returns `None` for an unknown method so the
-    /// caller can raise the documented build error.
-    pub fn parse(name: &str) -> Option<Rounding> {
-        match name {
-            "trunc" => Some(Rounding::Trunc),
-            "floor" => Some(Rounding::Floor),
-            "ceil" => Some(Rounding::Ceil),
-            "round" => Some(Rounding::Round),
-            _ => None,
-        }
-    }
-
     /// Apply the rounding to a finite or non-finite double.
     fn apply(self, x: f64) -> f64 {
         match self {
@@ -49,9 +37,10 @@ impl Rounding {
 }
 
 /// Holds the configured rounding mode and produces JSON fragments for each
-/// primitive type.
+/// primitive type. Internal to the crate. Callers reach this behavior through a
+/// compiled [`crate::Stringify`], not directly.
 #[derive(Debug, Clone, Default)]
-pub struct Serializer {
+pub(crate) struct Serializer {
     rounding: Rounding,
 }
 
@@ -309,4 +298,120 @@ fn escape_json_string(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn serializer() -> Serializer {
+        Serializer::new(Rounding::Trunc)
+    }
+
+    #[test]
+    fn as_number_converts_bigint() {
+        let out = serializer().as_number(&Value::BigInt(11753021440)).unwrap();
+        assert_eq!(out, "11753021440");
+    }
+
+    #[test]
+    fn as_integer_of_bigint() {
+        assert_eq!(
+            serializer().as_integer(&Value::BigInt(1615)).unwrap(),
+            "1615"
+        );
+    }
+
+    #[test]
+    fn as_integer_of_negative_zero() {
+        assert_eq!(serializer().as_integer(&Value::Number(-0.0)).unwrap(), "0");
+    }
+
+    #[test]
+    fn as_boolean_truthiness() {
+        let s = serializer();
+        assert_eq!(s.as_boolean(&Value::Number(1.0)), "true");
+        assert_eq!(s.as_boolean(&Value::Number(0.0)), "false");
+        assert_eq!(s.as_boolean(&Value::String(String::new())), "false");
+        assert_eq!(s.as_boolean(&Value::String("x".into())), "true");
+        assert_eq!(s.as_boolean(&Value::Null), "false");
+    }
+
+    #[test]
+    fn as_number_coercion_table() {
+        let s = serializer();
+        // (input, expected) matching String(Number(input)) in JavaScript.
+        let cases: &[(Value, &str)] = &[
+            (Value::String(String::new()), "0"),
+            (Value::String("  ".into()), "0"),
+            (Value::String("1e3".into()), "1000"),
+            (Value::String("0x10".into()), "16"),
+            (Value::Null, "0"),
+            (Value::Array(vec![]), "0"),
+            (Value::Array(vec![Value::Number(5.0)]), "5"),
+            (Value::Bool(true), "1"),
+            (Value::Number(-0.0), "0"),
+            (Value::Number(f64::MAX), "1.7976931348623157e+308"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(s.as_number(input).unwrap(), *expected, "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn as_number_string_coercion_table() {
+        let s = serializer();
+        // Number(string) rules. These mirror JavaScript's parse of each form.
+        let ok: &[(&str, &str)] = &[
+            ("123", "123"),
+            ("  12  ", "12"),
+            ("+5", "5"),
+            ("+.5", "0.5"),
+            (".5", "0.5"),
+            ("5.", "5"),
+            ("5.0", "5"),
+            ("1.5e3", "1500"),
+            ("0x1f", "31"),
+            ("0o17", "15"),
+            ("0b101", "5"),
+            ("-0", "0"),
+            ("", "0"),
+            ("  ", "0"),
+            // Both infinities render as the literal null under type: number.
+            ("Infinity", "null"),
+            ("-Infinity", "null"),
+        ];
+        for (input, expected) in ok {
+            let out = s.as_number(&Value::String((*input).into())).unwrap();
+            assert_eq!(out, *expected, "input {input:?}");
+        }
+
+        // Strings that do not parse as a number throw, interpolating the raw input.
+        let throws = ["1e", "0x", "+0x1F", "1_2", "1,2", ".", "12px"];
+        for input in throws {
+            let err = s
+                .as_number(&Value::String(input.into()))
+                .expect_err("should fail")
+                .message()
+                .to_string();
+            assert_eq!(
+                err,
+                format!("The value \"{input}\" cannot be converted to a number.")
+            );
+        }
+    }
+
+    #[test]
+    fn as_integer_string_coercion() {
+        let s = serializer();
+        assert_eq!(s.as_integer(&Value::String("  12  ".into())).unwrap(), "12");
+        // Trunc rounding drops the fractional part.
+        assert_eq!(s.as_integer(&Value::String("12.9".into())).unwrap(), "12");
+        let err = s
+            .as_integer(&Value::String("aaa".into()))
+            .expect_err("should fail")
+            .message()
+            .to_string();
+        assert_eq!(err, "The value \"aaa\" cannot be converted to an integer.");
+    }
 }
