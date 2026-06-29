@@ -284,3 +284,27 @@ fn invalid_anyof_schema() {
     }));
     assert!(err.contains("schema is invalid"));
 }
+
+#[test]
+fn large_enum_anyof_array_items() {
+    // A string-enum branch with more than 100 entries, plus a null branch.
+    // Branch selection must hold for a large enum, not just a small one.
+    let mut codes: Vec<String> = vec!["EUR".to_string(), "USD".to_string()];
+    for i in 0..200u32 {
+        let a = (b'A' + (i % 26) as u8) as char;
+        let b = (b'A' + ((i / 26) % 26) as u8) as char;
+        let c = (b'A' + ((i / 7) % 26) as u8) as char;
+        codes.push(format!("{a}{b}{c}"));
+    }
+    let schema = json!({
+        "type": "array",
+        "items": { "anyOf": [
+            { "type": "string", "enum": codes },
+            { "type": "null" }
+        ] }
+    });
+    assert_eq!(
+        run(schema, json!(["EUR", "USD", null])),
+        "[\"EUR\",\"USD\",null]"
+    );
+}

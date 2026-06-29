@@ -121,3 +121,64 @@ fn recursive_inline_id_references() {
         "{\"id\":\"0\",\"nodes\":[{\"id\":\"1\",\"nodes\":[{\"id\":\"2\",\"nodes\":[{\"id\":\"3\",\"nodes\":[]}]}]}]}"
     );
 }
+
+#[test]
+fn anyof_direct_self_reference() {
+    // The merged anyOf option points back at the root through a content id, so
+    // build terminates the recursion. An empty object serializes unchanged.
+    let schema = json!({
+        "type": "object",
+        "properties": { "foo": { "additionalProperties": false, "anyOf": [{ "$ref": "#" }] } }
+    });
+    assert_eq!(run(schema, json!({ "foo": {} })), "{\"foo\":{}}");
+}
+
+#[test]
+fn anyof_nested_self_reference() {
+    // A self-ref nested one anyOf deep reuses the same merged id, so it also
+    // terminates.
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "foo": { "additionalProperties": false, "anyOf": [{ "anyOf": [{ "$ref": "#" }] }] }
+        }
+    });
+    assert_eq!(run(schema, json!({ "foo": {} })), "{\"foo\":{}}");
+}
+
+#[test]
+fn anyof_external_recursive_shared_fragment() {
+    // Two properties reference the same recursive fragment in an external doc.
+    // Each renders the merged shape with the extra surrounding properties.
+    let external = json!({ "externalSchema": {
+        "type": "object",
+        "properties": {
+            "foo": { "properties": { "bar": { "type": "string" } }, "anyOf": [{ "$ref": "#" }] }
+        }
+    }});
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "a": { "$ref": "externalSchema#/properties/foo" },
+            "b": { "$ref": "externalSchema#/properties/foo" }
+        }
+    });
+    let opts = Options {
+        schema: external
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        ..Options::new()
+    };
+    let stringify = build_ok_opts(schema, opts);
+    let input = json!({
+        "a": { "foo": {}, "bar": "42", "baz": 42 },
+        "b": { "foo": {}, "bar": "42", "baz": 42 }
+    });
+    assert_eq!(
+        stringify.call(&Value::from(input)).unwrap(),
+        "{\"a\":{\"bar\":\"42\",\"foo\":{}},\"b\":{\"bar\":\"42\",\"foo\":{}}}"
+    );
+}

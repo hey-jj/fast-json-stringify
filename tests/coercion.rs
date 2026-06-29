@@ -2,47 +2,44 @@
 
 mod common;
 
-use common::run;
-use fast_json_stringify::{Rounding, Serializer, Value};
+use common::{build_ok, run};
 use serde_json::json;
 
 #[test]
-fn as_number_coercion_table() {
-    let serializer = Serializer::new(Rounding::Trunc);
-    // (input, expected) matching String(Number(input)) in JavaScript.
-    let cases: &[(Value, &str)] = &[
-        (Value::String(String::new()), "0"),
-        (Value::String("  ".into()), "0"),
-        (Value::String("1e3".into()), "1000"),
-        (Value::String("0x10".into()), "16"),
-        (Value::Null, "0"),
-        (Value::Array(vec![]), "0"),
-        (Value::Array(vec![Value::Number(5.0)]), "5"),
-        (Value::Bool(true), "1"),
-        (Value::Number(-0.0), "0"),
-        (Value::Number(f64::MAX), "1.7976931348623157e+308"),
+fn string_to_number_through_build() {
+    // A string under type: number coerces with JavaScript Number() rules.
+    let schema = json!({ "type": "number" });
+    let ok: &[(&str, &str)] = &[
+        ("123", "123"),
+        ("  12  ", "12"),
+        ("+.5", "0.5"),
+        ("5.0", "5"),
+        ("1.5e3", "1500"),
+        ("0x1f", "31"),
+        ("0o17", "15"),
+        ("0b101", "5"),
+        ("", "0"),
+        ("Infinity", "null"),
+        ("-Infinity", "null"),
     ];
-    for (input, expected) in cases {
+    for (input, expected) in ok {
         assert_eq!(
-            serializer.as_number(input).unwrap(),
+            run(schema.clone(), json!(input)),
             *expected,
-            "input {input:?}"
+            "input {input}"
         );
     }
-}
 
-#[test]
-fn as_number_nan_string_throws() {
-    let serializer = Serializer::new(Rounding::Trunc);
-    assert!(serializer
-        .as_number(&Value::String("not a number".into()))
-        .is_err());
-}
-
-#[test]
-fn as_integer_of_negative_zero() {
-    let serializer = Serializer::new(Rounding::Trunc);
-    assert_eq!(serializer.as_integer(&Value::Number(-0.0)).unwrap(), "0");
+    let stringify = build_ok(schema);
+    for input in ["1e", "0x", "1_2", ".", "12px"] {
+        let err = stringify
+            .call(&fast_json_stringify::Value::String(input.into()))
+            .expect_err("should fail");
+        assert_eq!(
+            err.message(),
+            format!("The value \"{input}\" cannot be converted to a number.")
+        );
+    }
 }
 
 #[test]

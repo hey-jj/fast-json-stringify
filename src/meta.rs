@@ -5,6 +5,16 @@
 //! `schema is invalid: data<path> <reason>`. This module checks the keywords the
 //! tests exercise and reproduces that message format. It is not a full
 //! meta-schema, it covers the structural rules that the suite asserts on.
+//!
+//! Covered: `type` values, combinator array shape and minimum length,
+//! schema-typed keywords (`not`, `if`, `then`, `else`, `additionalProperties`,
+//! `additionalItems`), `patternProperties` regex validity, schema-map keyword
+//! shapes (`properties`, `definitions`, `$defs`), and `items` shape.
+//!
+//! Not covered: value-level rules such as `required` being an array of unique
+//! strings, `enum` being a non-empty array, or numeric keywords being numbers.
+//! A schema invalid under Draft-7 in one of those ways compiles here instead of
+//! throwing.
 
 use crate::error::BuildError;
 use serde_json::Value;
