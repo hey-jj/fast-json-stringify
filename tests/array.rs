@@ -179,6 +179,27 @@ fn tuple_item_type_mismatch_throws() {
 }
 
 #[test]
+fn tuple_integer_position_rejects_bigint() {
+    // Number.isInteger(5n) is false, so a BigInt at an integer tuple position
+    // matches no branch and throws.
+    let stringify = build_ok(json!({ "type": "array", "items": [{ "type": "integer" }] }));
+    let err = stringify
+        .call(&Value::Array(vec![Value::BigInt(5)]))
+        .expect_err("bigint should not match an integer tuple item");
+    assert_eq!(err.message(), "Item at 0 does not match schema definition.");
+}
+
+#[test]
+fn tuple_number_position_rejects_bigint() {
+    // Number.isFinite(5n) is false, so a BigInt at a number tuple position throws.
+    let stringify = build_ok(json!({ "type": "array", "items": [{ "type": "number" }] }));
+    let err = stringify
+        .call(&Value::Array(vec![Value::BigInt(5)]))
+        .expect_err("bigint should not match a number tuple item");
+    assert_eq!(err.message(), "Item at 0 does not match schema definition.");
+}
+
+#[test]
 fn additional_items_ignored_when_items_not_tuple() {
     let schema = json!({
         "type": "object",

@@ -576,14 +576,16 @@ fn build_single_type(
 fn build_const(compiler: &mut Compiler, location: &Location) -> NodeId {
     let value = location.schema.get("const").cloned().unwrap_or(Json::Null);
     let rendered = render_json(&value);
+    // A null input renders as null only when 'null' is in a type array. The
+    // nullable keyword is handled by the Node::Nullable wrapper in build_value,
+    // which short circuits a null input before the const node runs.
     let null_alternative = match location.schema.get("type") {
         Some(Json::Array(types)) => types.iter().any(|t| t.as_str() == Some("null")),
         _ => false,
     };
-    let nullable_attr = location.schema.get("nullable") == Some(&Json::Bool(true));
     compiler.push(Node::Const {
         rendered,
-        null_alternative: null_alternative || nullable_attr,
+        null_alternative,
     })
 }
 
@@ -1110,11 +1112,12 @@ impl Plan {
                 out.push_str(&rendered);
             }
             Node::StringUnsafe => {
-                if let Value::String(s) = value {
-                    out.push_str(&self.serializer.as_unsafe_string(s));
-                } else {
-                    out.push_str(&self.emit_plain_string(value));
-                }
+                // asUnsafeString is '"' + str + '"' with no type check. String
+                // concatenation coerces any value through its default toString,
+                // so null becomes "null", a number its decimal, and so on. The
+                // result is unescaped by design.
+                let coerced = crate::serializer::display_value(value);
+                out.push_str(&self.serializer.as_unsafe_string(&coerced));
             }
             Node::AnyJson => out.push_str(&crate::native::stringify_value(value)),
             Node::Const {
@@ -1243,9 +1246,6 @@ impl Plan {
             for (key, v) in obj.iter() {
                 if known.contains(&key.as_str()) {
                     continue;
-                }
-                if matches!(v, Value::Custom(_)) {
-                    // a toJSON object still serializes, fall through
                 }
                 let mut matched = false;
                 for pattern in &node.pattern_properties {
@@ -1411,13 +1411,15 @@ fn multi_type_matches(type_name: TypeName, value: &Value) -> bool {
             ) || value.is_null()
         }
         TypeName::Array => matches!(value, Value::Array(_)),
+        // Number.isInteger(x) is false for a BigInt, so a BigInt never matches
+        // the integer branch. It can still match the null branch only if null.
         TypeName::Integer => match value {
             Value::Number(n) => n.fract() == 0.0 && n.is_finite(),
-            Value::BigInt(_) => true,
             Value::Null => true,
             _ => false,
         },
-        TypeName::Number => matches!(value, Value::Number(_) | Value::BigInt(_)) || value.is_null(),
+        // typeof bigint is "bigint", not "number", so a BigInt does not match.
+        TypeName::Number => matches!(value, Value::Number(_)) || value.is_null(),
         TypeName::Boolean => matches!(value, Value::Bool(_)) || value.is_null(),
         TypeName::Object => matches!(value, Value::Object(_) | Value::Custom(_)) || value.is_null(),
     }
@@ -1450,14 +1452,14 @@ fn single_item_type_matches(name: &str, value: &Value) -> bool {
                 Value::String(_) | Value::Date(_) | Value::Regex(_) | Value::Custom(_)
             ) || value.is_null()
         }
+        // Number.isInteger and Number.isFinite both return false for a BigInt,
+        // so a BigInt fails an integer or number tuple position.
         "integer" => match value {
             Value::Number(n) => n.fract() == 0.0 && n.is_finite(),
-            Value::BigInt(_) => true,
             _ => false,
         },
         "number" => match value {
             Value::Number(n) => n.is_finite(),
-            Value::BigInt(_) => true,
             _ => false,
         },
         "boolean" => matches!(value, Value::Bool(_)),

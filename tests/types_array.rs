@@ -226,3 +226,30 @@ fn none_of_types_matches_throws() {
         "The value of '#/properties/data' does not match schema definition."
     );
 }
+
+#[test]
+fn integer_union_rejects_bigint() {
+    // Number.isInteger(5n) is false and 5n is not null, so a BigInt matches
+    // neither the integer nor the null branch and the union throws.
+    let stringify = build_ok(json!({ "type": ["integer", "null"] }));
+    let err = stringify
+        .call(&Value::BigInt(5))
+        .expect_err("bigint should not match an integer union");
+    assert_eq!(
+        err.message(),
+        "The value of '#' does not match schema definition."
+    );
+}
+
+#[test]
+fn number_union_rejects_bigint() {
+    // typeof 5n is "bigint", not "number", so a BigInt fails a number union.
+    let stringify = build_ok(json!({ "type": ["number", "null"] }));
+    let err = stringify
+        .call(&Value::BigInt(5))
+        .expect_err("bigint should not match a number union");
+    assert_eq!(
+        err.message(),
+        "The value of '#' does not match schema definition."
+    );
+}

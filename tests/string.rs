@@ -38,6 +38,25 @@ fn unsafe_string_emits_raw_quotes() {
 }
 
 #[test]
+fn unsafe_non_string_coerces_then_wraps() {
+    // asUnsafeString is '"' + value + '"'. String concatenation coerces any
+    // value through its default toString, with no JSON escaping.
+    let schema = json!({ "type": "string", "format": "unsafe" });
+    assert_eq!(run(schema.clone(), json!(null)), "\"null\"");
+    assert_eq!(run(schema.clone(), json!(5)), "\"5\"");
+    assert_eq!(run(schema.clone(), json!(true)), "\"true\"");
+    assert_eq!(run(schema.clone(), json!([1, 2])), "\"1,2\"");
+    assert_eq!(run(schema, json!({ "a": 1 })), "\"[object Object]\"");
+}
+
+#[test]
+fn unsafe_string_with_specials_stays_raw() {
+    // The point of unsafe is no escaping, so control characters pass through.
+    let schema = json!({ "type": "string", "format": "unsafe" });
+    assert_eq!(run(schema, json!("a\tb")), "\"a\tb\"");
+}
+
+#[test]
 fn surrogate_pair_round_trips() {
     // A valid astral character serializes verbatim.
     assert_eq!(run(json!({ "type": "string" }), json!("𝌆")), "\"𝌆\"");
