@@ -116,12 +116,22 @@ fn check(schema: &Value, path: &str) -> Option<Failure> {
     }
 
     for keyword in ["properties", "patternProperties", "definitions", "$defs"] {
-        if let Some(Value::Object(props)) = map.get(keyword) {
-            for (key, sub) in props {
-                if let Some(f) = check(sub, &format!("{path}/{keyword}/{key}")) {
-                    return Some(f);
+        match map.get(keyword) {
+            Some(Value::Object(props)) => {
+                for (key, sub) in props {
+                    if let Some(f) = check(sub, &format!("{path}/{keyword}/{key}")) {
+                        return Some(f);
+                    }
                 }
             }
+            // A non-object value for a schema-map keyword is invalid.
+            Some(_) => {
+                return Some(Failure {
+                    instance_path: format!("{path}/{keyword}"),
+                    message: "must be object".to_string(),
+                })
+            }
+            None => {}
         }
     }
 

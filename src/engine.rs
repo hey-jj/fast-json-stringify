@@ -1060,9 +1060,18 @@ fn build_if_then_else(
             json_stringify_arrays,
         )?
     } else {
+        // The else falls back to the root schema without if/then/else. Register
+        // it under a fresh id so it does not collide with this node's own
+        // memoized reference, which would loop.
+        let fallback_id = format!("__fjs_merged_{}", compiler.merged_counter);
+        compiler.merged_counter += 1;
+        compiler
+            .resolver
+            .add_schema(root_location.schema.clone(), &fallback_id);
+        let fallback_location = Location::new(root_location.schema.clone(), fallback_id);
         build_value(
             compiler,
-            root_location,
+            fallback_location,
             large_array_size,
             json_stringify_arrays,
         )?
