@@ -260,6 +260,9 @@ struct Compiler {
     memo: HashMap<String, NodeId>,
     /// References currently being built, to break cycles.
     building: Vec<String>,
+    /// Map a merged schema's canonical content to the id it registered under, so
+    /// a recurring merge reuses one node and recursion terminates.
+    merged_by_content: HashMap<String, String>,
 }
 
 impl Compiler {
@@ -334,6 +337,7 @@ pub fn compile(
         merged_counter: 0,
         memo: HashMap::new(),
         building: Vec::new(),
+        merged_by_content: HashMap::new(),
     };
 
     let location = Location::new(schema.clone(), root_schema_id);
@@ -424,45 +428,29 @@ fn build_value(
         location = resolve_ref(compiler, &location)?;
     }
 
-    // Memoize by resolved reference for recursion.
+    // Memoize by resolved reference so recursion terminates. Reserve a slot and
+    // register it before recursing, then fill it once the body is built.
     let memo_key = location.schema_ref();
     if let Some(&id) = compiler.memo.get(&memo_key) {
         return Ok(id);
     }
-    if compiler.building.contains(&memo_key) {
-        // Already building this reference. Reuse the reserved slot.
-        if let Some(&id) = compiler.memo.get(&memo_key) {
-            return Ok(id);
-        }
-    }
 
-    if location.schema.get("allOf").is_some() {
-        return build_all_of(compiler, &location, large_array_size, json_stringify_arrays);
-    }
-
-    if location.schema.get("anyOf").is_some() || location.schema.get("oneOf").is_some() {
-        return build_one_of(compiler, &location, large_array_size, json_stringify_arrays);
-    }
-
-    if location.schema.get("if").is_some() && location.schema.get("then").is_some() {
-        return build_if_then_else(compiler, &location, large_array_size, json_stringify_arrays);
-    }
-
-    // Infer type from keywords when absent.
-    let inferred_type = infer_type(&location.schema);
-
-    let nullable = location.schema.get("nullable") == Some(&Json::Bool(true));
-
-    // Reserve a slot so recursive object/array refs can point here.
     let slot = compiler.reserve();
     compiler.memo.insert(memo_key.clone(), slot);
     compiler.building.push(memo_key.clone());
 
-    let inner = if location.schema.get("const").is_some() {
+    let inner = if location.schema.get("allOf").is_some() {
+        build_all_of(compiler, &location, large_array_size, json_stringify_arrays)?
+    } else if location.schema.get("anyOf").is_some() || location.schema.get("oneOf").is_some() {
+        build_one_of(compiler, &location, large_array_size, json_stringify_arrays)?
+    } else if location.schema.get("if").is_some() && location.schema.get("then").is_some() {
+        build_if_then_else(compiler, &location, large_array_size, json_stringify_arrays)?
+    } else if location.schema.get("const").is_some() {
         build_const(compiler, &location)
     } else if let Some(Json::Array(_)) = location.schema.get("type") {
         build_multi_type(compiler, &location, large_array_size, json_stringify_arrays)?
     } else {
+        let inferred_type = infer_type(&location.schema);
         build_single_type(
             compiler,
             &location,
@@ -473,6 +461,8 @@ fn build_value(
     };
 
     compiler.building.pop();
+
+    let nullable = location.schema.get("nullable") == Some(&Json::Bool(true));
 
     // Move the built node into the reserved slot, then wrap for nullable.
     let inner_node = compiler.nodes[inner].clone();
@@ -897,8 +887,24 @@ fn merge_locations(
     }
 
     let merged_schema = merge_schemas(&schemas)?;
+
+    // Reuse an existing merged id when the merged content matches. This keeps a
+    // recursive merge from minting a fresh id each pass, which would loop.
+    let content = merged_schema.to_string();
+    if let Some(existing_id) = compiler.merged_by_content.get(&content) {
+        let existing = compiler
+            .resolver
+            .get_schema(existing_id, "#")
+            .cloned()
+            .unwrap_or_else(|| merged_schema.clone());
+        return Ok(Location::new(existing, existing_id.clone()));
+    }
+
     let merged_id = format!("__fjs_merged_{}", compiler.merged_counter);
     compiler.merged_counter += 1;
+    compiler
+        .merged_by_content
+        .insert(content, merged_id.clone());
     compiler
         .resolver
         .add_schema(merged_schema.clone(), &merged_id);
@@ -980,15 +986,18 @@ fn build_one_of(
     let mut options = Vec::new();
     for i in 0..options_json.len() {
         let option_location = options_location.index(i);
-        let option_schema_resolved = if option_location
+        // Resolve a ref option so the validator sees the target schema, and
+        // track the document the target lives in so its inner refs resolve.
+        let (option_schema_resolved, option_base_id) = if option_location
             .schema
             .get("$ref")
             .and_then(Json::as_str)
             .is_some()
         {
-            resolve_ref(compiler, &option_location)?.schema
+            let resolved = resolve_ref(compiler, &option_location)?;
+            (resolved.schema, resolved.schema_id)
         } else {
-            option_location.schema.clone()
+            (option_location.schema.clone(), location.schema_id.clone())
         };
 
         let merged = merge_locations(
@@ -998,7 +1007,7 @@ fn build_one_of(
         let node = build_value(compiler, merged, large_array_size, json_stringify_arrays)?;
         options.push(BranchOption {
             schema: option_schema_resolved,
-            base_id: location.schema_id.clone(),
+            base_id: option_base_id,
             node,
         });
     }
