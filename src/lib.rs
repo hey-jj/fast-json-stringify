@@ -45,6 +45,11 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+// Compile the README examples as doc tests so they cannot drift.
+#[doc = include_str!("../README.md")]
+#[cfg(doctest)]
+struct ReadmeDoctests;
+
 mod engine;
 mod error;
 mod merge;
