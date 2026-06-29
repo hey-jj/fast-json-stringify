@@ -1,9 +1,9 @@
 //! Shared test helpers.
 //!
-//! Most upstream assertions compare against a literal expected string or against
-//! native `JSON.stringify(input)`. These helpers wrap the build-and-call dance
-//! and a small native serializer that mirrors `JSON.stringify` for the inputs
-//! the suite uses.
+//! Most cases compare against a literal expected string or against native
+//! `JSON.stringify(input)`. These helpers wrap the build-and-call dance and a
+//! small native serializer that mirrors `JSON.stringify` for the inputs the
+//! suite uses.
 
 #![allow(dead_code)]
 

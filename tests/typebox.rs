@@ -1,4 +1,4 @@
-//! Interop with a TypeBox-generated schema, ported as a plain schema.
+//! Interop with a TypeBox-generated schema, written as a plain schema.
 //!
 //! TypeBox `Record(String, T)` compiles to an object with a `.*`
 //! patternProperties entry. The schema literal below is what TypeBox would emit.

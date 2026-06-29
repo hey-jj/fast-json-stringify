@@ -9,8 +9,8 @@
 /// A JavaScript-shaped value handed to a compiled serializer.
 ///
 /// The first six variants mirror JSON. `Date`, `BigInt`, and `RegExp` model the
-/// host objects the upstream serializer coerces. `Custom` carries a value that
-/// already went through a `toJSON` hook, letting tests reproduce that behavior.
+/// host objects the serializer coerces. `Custom` carries a value that already
+/// went through a `toJSON` hook, letting tests reproduce that behavior.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// JSON `null`, or a deliberately absent value.
