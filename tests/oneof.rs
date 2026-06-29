@@ -179,3 +179,91 @@ fn invalid_oneof_schema() {
     }));
     assert!(err.contains("schema is invalid"));
 }
+
+#[test]
+fn branch_selected_by_pattern() {
+    // The branches differ only by pattern. One renders unsafe (raw), the other
+    // plain (escaped), so the chosen branch is visible in the output.
+    let schema = json!({
+        "type": "object",
+        "properties": { "v": { "oneOf": [
+            { "type": "string", "pattern": "^[0-9]", "format": "unsafe" },
+            { "type": "string", "pattern": "^x" }
+        ] } }
+    });
+    let s = build_ok(schema);
+    // Starts with x, so the plain branch escapes the quote.
+    assert_eq!(
+        s.call(&Value::from(json!({ "v": "x\"y" }))).unwrap(),
+        "{\"v\":\"x\\\"y\"}"
+    );
+    // Starts with a digit, so the unsafe branch leaves the quote raw.
+    assert_eq!(
+        s.call(&Value::from(json!({ "v": "9\"z" }))).unwrap(),
+        "{\"v\":\"9\"z\"}"
+    );
+}
+
+#[test]
+fn branch_selected_by_length() {
+    // maxLength picks the unsafe branch, minLength the plain branch.
+    let schema = json!({
+        "type": "object",
+        "properties": { "v": { "oneOf": [
+            { "type": "string", "maxLength": 2, "format": "unsafe" },
+            { "type": "string", "minLength": 3 }
+        ] } }
+    });
+    let s = build_ok(schema);
+    assert_eq!(
+        s.call(&Value::from(json!({ "v": "a\"" }))).unwrap(),
+        "{\"v\":\"a\"\"}"
+    );
+    assert_eq!(
+        s.call(&Value::from(json!({ "v": "abc\"" }))).unwrap(),
+        "{\"v\":\"abc\\\"\"}"
+    );
+}
+
+#[test]
+fn branch_selected_by_multiple_of() {
+    let schema = json!({
+        "type": "object",
+        "properties": { "v": { "oneOf": [
+            { "type": "integer", "multipleOf": 2, "const": 4 },
+            { "type": "integer", "const": 3 }
+        ] } }
+    });
+    let s = build_ok(schema);
+    assert_eq!(
+        s.call(&Value::from(json!({ "v": 4 }))).unwrap(),
+        "{\"v\":4}"
+    );
+    assert_eq!(
+        s.call(&Value::from(json!({ "v": 3 }))).unwrap(),
+        "{\"v\":3}"
+    );
+}
+
+#[test]
+fn branch_selected_by_unique_items() {
+    // A unique array picks the unsafe branch, a duplicate array the plain one.
+    let schema = json!({
+        "type": "object",
+        "properties": { "v": { "oneOf": [
+            { "type": "array", "uniqueItems": true,
+              "items": { "type": "string", "format": "unsafe" } },
+            { "type": "array", "items": { "type": "string" } }
+        ] } }
+    });
+    let s = build_ok(schema);
+    assert_eq!(
+        s.call(&Value::from(json!({ "v": ["a\"", "b"] }))).unwrap(),
+        "{\"v\":[\"a\"\",\"b\"]}"
+    );
+    assert_eq!(
+        s.call(&Value::from(json!({ "v": ["a\"", "a\""] })))
+            .unwrap(),
+        "{\"v\":[\"a\\\"\",\"a\\\"\"]}"
+    );
+}

@@ -2,10 +2,15 @@
 //!
 //! `anyOf`, `oneOf`, and `if/then/else` pick a branch by testing the input
 //! against each candidate schema. This validator covers the keywords those
-//! schemas use in practice: `type`, `enum`, `const`, `required`, `properties`,
-//! numeric bounds, array bounds, and `additionalProperties: false`. A value the
-//! serializer would coerce to a string (a `Date`, `RegExp`, or `toJSON` object)
-//! counts as a string, mirroring the `fjs_type` leniency in the source.
+//! schemas use to tell branches apart: `type`, `enum`, `const`, `required`,
+//! `properties`, numeric bounds, `multipleOf`, `pattern`, `minLength`,
+//! `maxLength`, array bounds, `uniqueItems`, and `additionalProperties: false`.
+//! A value the serializer would coerce to a string (a `Date`, `RegExp`, or
+//! `toJSON` object) counts as a string, mirroring the `fjs_type` leniency in the
+//! source.
+//!
+//! String length follows JavaScript and counts UTF-16 code units, not Rust
+//! bytes or scalar values.
 
 use crate::refresolver::RefResolver;
 use crate::value::Value;
@@ -77,6 +82,28 @@ fn check_keywords(
         }
     }
 
+    if let Value::String(s) = value {
+        if let Some(Json::String(pattern)) = map.get("pattern") {
+            match regex::Regex::new(pattern) {
+                Ok(re) if re.is_match(s) => {}
+                // A non-matching string fails. A pattern that does not compile
+                // can never match, so the branch fails too.
+                _ => return false,
+            }
+        }
+        let len = utf16_len(s);
+        if let Some(min) = map.get("minLength").and_then(Json::as_u64) {
+            if (len as u64) < min {
+                return false;
+            }
+        }
+        if let Some(max) = map.get("maxLength").and_then(Json::as_u64) {
+            if len as u64 > max {
+                return false;
+            }
+        }
+    }
+
     if let Some(Json::Array(required)) = map.get("required") {
         if let Value::Object(obj) = value {
             for key in required {
@@ -136,6 +163,11 @@ fn check_keywords(
                 return false;
             }
         }
+        if let Some(multiple) = map.get("multipleOf").and_then(Json::as_f64) {
+            if multiple == 0.0 || !is_multiple_of(num, multiple) {
+                return false;
+            }
+        }
     }
 
     if let Value::Array(items) = value {
@@ -157,9 +189,38 @@ fn check_keywords(
                 }
             }
         }
+        if map.get("uniqueItems") == Some(&Json::Bool(true)) && has_duplicate(items) {
+            return false;
+        }
     }
 
     true
+}
+
+/// JavaScript string length: the count of UTF-16 code units.
+fn utf16_len(s: &str) -> usize {
+    s.chars().map(char::len_utf16).sum()
+}
+
+/// True when `num` is an integer multiple of `multiple`, matching ajv. Uses a
+/// relative tolerance so float division does not reject exact multiples like
+/// 0.3 against 0.1.
+fn is_multiple_of(num: f64, multiple: f64) -> bool {
+    let quotient = num / multiple;
+    let rounded = quotient.round();
+    (quotient - rounded).abs() < 1e-9 * quotient.abs().max(1.0)
+}
+
+/// True when two array elements compare equal, matching `uniqueItems`.
+fn has_duplicate(items: &[Value]) -> bool {
+    for (i, a) in items.iter().enumerate() {
+        for b in &items[i + 1..] {
+            if a == b {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Check a value against a `type` keyword, applying the string leniency.
