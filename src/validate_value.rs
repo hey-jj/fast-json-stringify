@@ -54,6 +54,11 @@ fn check_keywords(
     resolver: &RefResolver,
     base_id: &str,
 ) -> bool {
+    // A nullable schema accepts null outright, matching the OpenAPI extension.
+    if map.get("nullable") == Some(&Json::Bool(true)) && matches!(value, Value::Null) {
+        return true;
+    }
+
     if let Some(type_value) = map.get("type") {
         if !check_type(type_value, value) {
             return false;
@@ -142,6 +147,14 @@ fn check_keywords(
         if let Some(min) = map.get("minItems").and_then(Json::as_u64) {
             if (items.len() as u64) < min {
                 return false;
+            }
+        }
+        // A single items schema applies to every element.
+        if let Some(item_schema @ (Json::Object(_) | Json::Bool(_))) = map.get("items") {
+            for element in items {
+                if !validate(item_schema, element, resolver, base_id) {
+                    return false;
+                }
             }
         }
     }
