@@ -60,6 +60,31 @@ fn date_format_padding() {
 }
 
 #[test]
+fn expanded_year_iso() {
+    let dt = build_ok(json!({ "type": "string", "format": "date-time" }));
+    let d = build_ok(json!({ "type": "string", "format": "date" }));
+    // Years outside 0000-9999 use ISO 8601 expanded notation: a signed
+    // six-digit year, matching Date.prototype.toISOString.
+    assert_eq!(
+        dt.call(&Value::Date(8640000000000000)).unwrap(),
+        "\"+275760-09-13T00:00:00.000Z\""
+    );
+    assert_eq!(
+        dt.call(&Value::Date(-62198755200000)).unwrap(),
+        "\"-000001-01-01T00:00:00.000Z\""
+    );
+    assert_eq!(
+        d.call(&Value::Date(253402300800000)).unwrap(),
+        "\"+010000-01-01\""
+    );
+    // Year 0 stays four digits, the lower edge of the plain range.
+    assert_eq!(
+        d.call(&Value::Date(-62167219200000)).unwrap(),
+        "\"0000-01-01\""
+    );
+}
+
+#[test]
 fn time_format() {
     let stringify = build_ok(json!({ "type": "string", "format": "time" }));
     assert_eq!(stringify.call(&Value::Date(BASE)).unwrap(), "\"01:03:25\"");

@@ -173,13 +173,28 @@ impl From<serde_json::Value> for Value {
 /// `Date.prototype.toISOString`.
 pub(crate) fn iso_from_millis(ms: i64) -> String {
     let (y, mo, d, h, mi, s, milli) = civil_from_millis(ms);
-    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{milli:03}Z")
+    format!(
+        "{}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{milli:03}Z",
+        iso_year(y)
+    )
 }
 
 /// Render the date portion (`YYYY-MM-DD`) of epoch milliseconds.
 pub(crate) fn date_slice_from_millis(ms: i64) -> String {
     let (y, mo, d, _, _, _, _) = civil_from_millis(ms);
-    format!("{y:04}-{mo:02}-{d:02}")
+    format!("{}-{mo:02}-{d:02}", iso_year(y))
+}
+
+/// Format an ISO 8601 year. Years 0 through 9999 use four digits. Outside that
+/// range `Date.prototype.toISOString` switches to an expanded year: a sign and
+/// six digits, such as `+275760` or `-000001`.
+fn iso_year(year: i64) -> String {
+    if (0..=9999).contains(&year) {
+        format!("{year:04}")
+    } else {
+        let sign = if year < 0 { '-' } else { '+' };
+        format!("{sign}{:06}", year.unsigned_abs())
+    }
 }
 
 /// Render the time portion (`HH:mm:ss`) of epoch milliseconds.
