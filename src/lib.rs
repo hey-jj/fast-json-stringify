@@ -83,7 +83,7 @@ pub enum LargeArrayMechanism {
     JsonStringify,
 }
 
-/// Build options, mirroring the source `Options` object.
+/// Build options.
 pub struct Options {
     /// External schemas keyed by name for `$ref` resolution.
     pub schema: HashMap<String, serde_json::Value>,
