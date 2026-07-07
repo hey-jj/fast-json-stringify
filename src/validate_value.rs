@@ -15,19 +15,60 @@
 use crate::refresolver::RefResolver;
 use crate::value::Value;
 use serde_json::Value as Json;
+use std::collections::HashMap;
+
+pub(crate) type BranchPatternCache = HashMap<String, Option<regex::Regex>>;
+
+pub(crate) fn compile_pattern_cache<'a, I>(schemas: I) -> BranchPatternCache
+where
+    I: IntoIterator<Item = &'a Json>,
+{
+    let mut patterns = BranchPatternCache::new();
+    for schema in schemas {
+        collect_patterns(schema, &mut patterns);
+    }
+    patterns
+}
+
+fn collect_patterns(schema: &Json, patterns: &mut BranchPatternCache) {
+    match schema {
+        Json::Object(map) => {
+            if let Some(Json::String(pattern)) = map.get("pattern") {
+                patterns
+                    .entry(pattern.clone())
+                    .or_insert_with(|| regex::Regex::new(pattern).ok());
+            }
+            for value in map.values() {
+                collect_patterns(value, patterns);
+            }
+        }
+        Json::Array(items) => {
+            for item in items {
+                collect_patterns(item, patterns);
+            }
+        }
+        _ => {}
+    }
+}
 
 /// Test whether `value` satisfies `schema`, resolving `$ref` through `resolver`.
-pub fn validate(schema: &Json, value: &Value, resolver: &RefResolver, base_id: &str) -> bool {
+pub fn validate(
+    schema: &Json,
+    value: &Value,
+    resolver: &RefResolver,
+    base_id: &str,
+    patterns: &BranchPatternCache,
+) -> bool {
     match schema {
         Json::Bool(b) => *b,
         Json::Object(map) => {
             if let Some(Json::String(reference)) = map.get("$ref") {
                 if let Some((resolved, next_base)) = resolve(reference, resolver, base_id) {
-                    return validate(resolved, value, resolver, &next_base);
+                    return validate(resolved, value, resolver, &next_base, patterns);
                 }
                 return false;
             }
-            check_keywords(map, value, resolver, base_id)
+            check_keywords(map, value, resolver, base_id, patterns)
         }
         _ => true,
     }
@@ -58,6 +99,7 @@ fn check_keywords(
     value: &Value,
     resolver: &RefResolver,
     base_id: &str,
+    patterns: &BranchPatternCache,
 ) -> bool {
     // A nullable schema accepts null outright, matching the OpenAPI extension.
     if map.get("nullable") == Some(&Json::Bool(true)) && matches!(value, Value::Null) {
@@ -84,11 +126,12 @@ fn check_keywords(
 
     if let Value::String(s) = value {
         if let Some(Json::String(pattern)) = map.get("pattern") {
-            match regex::Regex::new(pattern) {
-                Ok(re) if re.is_match(s) => {}
-                // A non-matching string fails. A pattern that does not compile
-                // can never match, so the branch fails too.
-                _ => return false,
+            if !patterns
+                .get(pattern)
+                .and_then(Option::as_ref)
+                .is_some_and(|re| re.is_match(s))
+            {
+                return false;
             }
         }
         let len = utf16_len(s);
@@ -122,20 +165,16 @@ fn check_keywords(
         if let Some(Json::Object(props)) = map.get("properties") {
             for (key, sub) in props {
                 if let Some(field) = obj.get(key) {
-                    if !validate(sub, field, resolver, base_id) {
+                    if !validate(sub, field, resolver, base_id, patterns) {
                         return false;
                     }
                 }
             }
         }
         if map.get("additionalProperties") == Some(&Json::Bool(false)) {
-            let known: Vec<&String> = map
-                .get("properties")
-                .and_then(|p| p.as_object())
-                .map(|p| p.keys().collect())
-                .unwrap_or_default();
+            let props = map.get("properties").and_then(Json::as_object);
             for (key, _) in obj.iter() {
-                if !known.contains(&key) {
+                if !props.is_some_and(|p| p.contains_key(key)) {
                     return false;
                 }
             }
@@ -184,7 +223,7 @@ fn check_keywords(
         // A single items schema applies to every element.
         if let Some(item_schema @ (Json::Object(_) | Json::Bool(_))) = map.get("items") {
             for element in items {
-                if !validate(item_schema, element, resolver, base_id) {
+                if !validate(item_schema, element, resolver, base_id, patterns) {
                     return false;
                 }
             }

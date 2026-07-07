@@ -11,7 +11,9 @@ use crate::merge::merge_schemas;
 use crate::meta;
 use crate::refresolver::RefResolver;
 use crate::serializer::{Rounding, Serializer};
+use crate::validate_value::compile_pattern_cache;
 use crate::validate_value::validate as validate_branch;
+use crate::validate_value::BranchPatternCache;
 use crate::value::Value;
 use serde_json::Value as Json;
 use std::collections::HashMap;
@@ -199,6 +201,7 @@ pub struct Plan {
     root: NodeId,
     serializer: Serializer,
     resolver: RefResolver,
+    branch_patterns: BranchPatternCache,
 }
 
 impl Plan {
@@ -330,6 +333,8 @@ pub fn compile(
         }
     }
 
+    let branch_patterns = compile_pattern_cache(std::iter::once(schema).chain(external.values()));
+
     let mut compiler = Compiler {
         nodes: Vec::new(),
         resolver,
@@ -353,6 +358,7 @@ pub fn compile(
         root,
         serializer: Serializer::new(rounding),
         resolver: compiler.resolver,
+        branch_patterns,
     })
 }
 
@@ -1152,7 +1158,13 @@ impl Plan {
                 then,
                 els,
             } => {
-                if validate_branch(if_schema, value, &self.resolver, base_id) {
+                if validate_branch(
+                    if_schema,
+                    value,
+                    &self.resolver,
+                    base_id,
+                    &self.branch_patterns,
+                ) {
                     self.emit(*then, value, out)?;
                 } else {
                     self.emit(*els, value, out)?;
@@ -1391,7 +1403,13 @@ impl Plan {
         out: &mut String,
     ) -> Result<(), StringifyError> {
         for option in options {
-            if validate_branch(&option.schema, value, &self.resolver, &option.base_id) {
+            if validate_branch(
+                &option.schema,
+                value,
+                &self.resolver,
+                &option.base_id,
+                &self.branch_patterns,
+            ) {
                 return self.emit(option.node, value, out);
             }
         }
