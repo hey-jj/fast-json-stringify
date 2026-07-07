@@ -31,7 +31,13 @@ impl Rounding {
             Rounding::Ceil => x.ceil(),
             // JavaScript Math.round rounds half toward positive infinity, which
             // differs from Rust's round-half-away-from-zero for negatives.
-            Rounding::Round => (x + 0.5).floor(),
+            Rounding::Round => {
+                if x.fract() == -0.5 {
+                    x.ceil()
+                } else {
+                    x.round()
+                }
+            }
         }
     }
 }
@@ -195,6 +201,7 @@ fn coerce_number(value: &Value) -> Option<f64> {
         Value::Array(items) => match items.as_slice() {
             // Number([]) === 0, Number([x]) === Number(x), else NaN.
             [] => Some(0.0),
+            [Value::Bool(_) | Value::Date(_)] => Some(f64::NAN),
             [one] => Some(coerce_number(one).unwrap_or(f64::NAN)),
             _ => Some(f64::NAN),
         },
